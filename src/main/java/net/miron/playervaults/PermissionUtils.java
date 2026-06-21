@@ -8,6 +8,7 @@ import net.luckperms.api.query.QueryOptions;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.RegistryAccess;
 
 public class PermissionUtils {
 
@@ -89,5 +90,10 @@ public class PermissionUtils {
         } catch (Exception e) {
             return viewer.hasPermissions(2);
         }
+    }
+    public static boolean hasVaultPermissionOrItems(ServerPlayer player, int number, RegistryAccess registryAccess) {
+        if (hasVaultPermission(player, number)) return true;
+        int size = ConfigManager.config.vaultSize;
+        return VaultStorage.hasAnyItems(player.getUUID(), number, size, registryAccess);
     }
 }

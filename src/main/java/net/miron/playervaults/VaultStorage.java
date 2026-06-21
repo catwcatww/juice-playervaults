@@ -82,4 +82,11 @@ public class VaultStorage {
             return NonNullList.withSize(size, ItemStack.EMPTY);
         }
     }
+    public static boolean hasAnyItems(UUID uuid, int number, int size, RegistryAccess registryAccess) {
+        NonNullList<ItemStack> items = loadVault(uuid, number, size, registryAccess);
+        for (ItemStack stack : items) {
+            if (!stack.isEmpty()) return true;
+        }
+        return false;
+    }
 }

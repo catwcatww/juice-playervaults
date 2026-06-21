@@ -48,23 +48,30 @@ public class PVCommand {
 
     private static int openVault(ServerPlayer viewer, ServerPlayer target, int number, CommandContext<CommandSourceStack> context) {
         boolean isSelf = viewer.getUUID().equals(target.getUUID());
+        UUID uuid = target.getUUID();
+        int vaultSize = ConfigManager.config.vaultSize;
+        RegistryAccess registryAccess = target.server.registryAccess();
 
-        if (!PermissionUtils.hasVaultPermission(viewer, number) && !viewer.hasPermissions(2)) {
+        boolean hasPermission = PermissionUtils.hasVaultPermission(viewer, number) || viewer.hasPermissions(2);
+        boolean hasItems = isSelf && VaultStorage.hasAnyItems(uuid, number, vaultSize, registryAccess);
+
+        // Block completely if no permission AND no items
+        if (!hasPermission && !hasItems) {
             viewer.sendSystemMessage(Component.literal("§cYou don't have permission to open PV #" + number));
             return 0;
         }
 
-        UUID uuid = target.getUUID();
-        int vaultSize = ConfigManager.config.vaultSize;
-
-        RegistryAccess registryAccess = target.server.registryAccess();
+        // Drain-only mode: had permission before but lost it, vault still has items
+        boolean isDrainOnly = isSelf && !hasPermission && hasItems;
 
         var loaded = VaultStorage.loadVault(uuid, number, vaultSize, registryAccess);
         SimpleContainer vaultContainer = new SimpleContainer(loaded.toArray(new ItemStack[0]));
 
-        boolean isEditable = isSelf || PermissionUtils.canEditOthers(viewer, target);
+        boolean isEditable = !isDrainOnly && (isSelf || PermissionUtils.canEditOthers(viewer, target));
 
-        if (isEditable) {
+        // Only add save listener if they can actually edit
+
+        if (isEditable || isDrainOnly) {
             vaultContainer.addListener(sender -> {
                 NonNullList<ItemStack> toSave = NonNullList.withSize(vaultContainer.getContainerSize(), ItemStack.EMPTY);
                 for (int i = 0; i < vaultContainer.getContainerSize(); i++) {
@@ -73,22 +80,36 @@ public class PVCommand {
                 VaultStorage.saveVault(uuid, number, toSave, registryAccess);
             });
         }
+
+        // Save on close for drain-only too (so taken items are removed from the vault file)
+        final boolean finalDrainOnly = isDrainOnly;
+
         MenuProvider menuProvider = new MenuProvider() {
             @Override
             public Component getDisplayName() {
-                return Component.literal((isSelf ? "Your" : target.getName().getString() + "'s") + " Vault #" + number + (isEditable ? "" : " (Read-Only)"));
+                if (finalDrainOnly)
+                    return Component.literal("Vault #" + number + " (Drain Only)");
+                return Component.literal((isSelf ? "Your" : target.getName().getString() + "'s")
+                        + " Vault #" + number + (isEditable ? "" : " (Read-Only)"));
             }
+
             @Override
             public AbstractContainerMenu createMenu(int syncId, Inventory playerInventory, Player player) {
+                if (finalDrainOnly)
+                    return new DrainOnlyVaultMenu(syncId, playerInventory, vaultContainer);
+                if (!isEditable)
+                    return new ReadOnlyVaultScreenHandler(syncId, playerInventory, vaultContainer);
                 return new ChestMenu(MenuType.GENERIC_9x6, syncId, playerInventory, vaultContainer, 6);
             }
         };
 
         viewer.openMenu(menuProvider);
 
-        if (!isEditable) {
+        if (isDrainOnly) {
+            viewer.sendSystemMessage(Component.literal("§eYou no longer have permission for PV #" + number + "."));
+            viewer.sendSystemMessage(Component.literal("§6You may only remove your existing items."));
+        } else if (!isEditable) {
             viewer.sendSystemMessage(Component.literal("§eNote: You are viewing this vault in read-only mode."));
-            viewer.sendSystemMessage(Component.literal("§6(Items cannot be moved, but you can still view them)"));
         }
 
         return 1;
